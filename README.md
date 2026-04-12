@@ -65,7 +65,7 @@ Follow these instructions to get a copy of the project up and running on your lo
 
 ## Project Structure
 
-The project code is organized with a clear separation of concerns, making it easy to navigate and maintain.
+The project code is organized with a clear separation of concerns, making it easy to navigate and maintain. 
 
 ```
 src/
@@ -107,6 +107,15 @@ The implementation follows the task requirements with the following assumptions 
 - In practice, the missing value concerns the gross price in WebSocket updates, not the net price. Therefore, gross values are derived from net values using the 23% VAT rate only when not present in the incoming update payload.
 - The table is sorted by number of shares in descending order to keep it consistent with the chart, which also visualizes share distribution.
 - For better chart readability, only the top companies are shown individually, while the remaining positions are aggregated into `Inne`.
+
+## Possible Improvements
+
+- Retry mechanism for initial data loading in case of temporary network issues
+- Improved error state handling in the UI (e.g. dedicated error views instead of only toast messages)
+- Pagination or virtual scrolling for larger datasets
+- Table enhancements such as sorting, filtering, and pinning important rows
+- End-to-end tests for key user flows
+- Persisting data locally (e.g. localStorage) for better UX on refresh
 
 ## AI Assistance
 
