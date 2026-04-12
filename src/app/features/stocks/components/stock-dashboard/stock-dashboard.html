@@ -1,0 +1,98 @@
+<p-toast position="top-center"></p-toast>
+<div class="dashboard">
+  <div class="dashboard__header">
+    <h1 class="dashboard__title">Portfolio akcji</h1>
+
+    <div class="dashboard__actions">
+      <button pButton label="Dodaj" icon="pi pi-plus" (click)="openDialog()"></button>
+      <div class="connection-status">
+        <span class="connection-status__label">Status połączenia:</span>
+
+        <span
+          class="connection-status__dot"
+          [class.is-connected]="store.wsConnectionStatus() === 'connected'"
+          [class.is-disconnected]="store.wsConnectionStatus() !== 'connected'"
+        ></span>
+
+        <span class="connection-status__text">
+          @switch (store.wsConnectionStatus()) {
+            @case ('connected') {
+              Połączono
+            }
+            @case ('connecting') {
+              Łączenie...
+            }
+            @case ('reconnecting') {
+              Błąd (ponowne łączenie...)
+            }
+            @default {
+              Rozłączono
+            }
+          }
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <p-card>
+    <p-table
+      [value]="store.rows()"
+      [loading]="store.loading()"
+      [rowTrackBy]="trackById"
+      dataKey="id"
+      [tableStyle]="{ 'min-width': '50rem' }"
+      class="stocks-table"
+    >
+      <ng-template pTemplate="header">
+        <tr>
+          <th>Nazwa firmy</th>
+          <th>Ilość akcji</th>
+          <th>Wartość brutto (PLN)</th>
+          <th>Wartość netto (PLN)</th>
+        </tr>
+      </ng-template>
+
+      <ng-template pTemplate="body" let-row>
+        <tr [class.updated-row]="isRowUpdated(row.id)">
+          <td class="company-name-cell">
+            <span>{{ row.name }}</span>
+          </td>
+
+          <td class="number-cell" [class.updated-cell]="isRowUpdated(row.id)">
+            {{ row.shares }}
+          </td>
+
+          <td class="number-cell" [class.updated-cell]="isRowUpdated(row.id)">
+            {{ row.totalGross | number: '1.2-2' }}
+          </td>
+
+          <td class="number-cell net-cell" [class.updated-cell]="isRowUpdated(row.id)">
+            <span>{{ row.totalNet | number: '1.2-2' }}</span>
+
+            <span
+              class="trend-indicator"
+              [class.trend-up]="row.trend === 'up'"
+              [class.trend-down]="row.trend === 'down'"
+              [class.trend-hidden]="!row.trend || row.trend === 'same'"
+              aria-hidden="true"
+            >
+              {{ row.trend === 'up' ? '↑' : row.trend === 'down' ? '↓' : '' }}
+            </span>
+          </td>
+        </tr>
+      </ng-template>
+
+      <ng-template pTemplate="emptymessage">
+        <tr>
+          <td colspan="4">Brak danych.</td>
+        </tr>
+      </ng-template>
+    </p-table>
+  </p-card>
+
+  <p-card header="Ilość akcji w podziale na firmy">
+    <div class="chart-wrapper">
+      <p-chart type="doughnut" [data]="store.chartData()" [options]="store.chartOptions()" />
+    </div>
+  </p-card>
+</div>

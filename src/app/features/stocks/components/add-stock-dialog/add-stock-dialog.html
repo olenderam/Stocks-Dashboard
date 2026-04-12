@@ -1,0 +1,39 @@
+<form [formGroup]="form" class="add-stock-form" (ngSubmit)="submit()">
+  <div class="form-field">
+    <label class="form-label" for="name">Nazwa firmy</label>
+    <input
+      id="name"
+      pInputText
+      formControlName="name"
+      class="form-input"
+      placeholder="Podaj nazwę firmy"
+      [invalid]="nameControl.touched && nameControl.invalid"
+    />
+    @if (nameControl.touched && nameControl.invalid) {
+      <small class="form-error">Podaj nazwę firmy (max 255 znaków).</small>
+    }
+  </div>
+
+  <div class="form-field">
+    <label class="form-label" for="shares">Ilość akcji</label>
+    <p-inputnumber
+      inputId="shares"
+      formControlName="shares"
+      [useGrouping]="false"
+      [min]="1"
+      [max]="10000000"
+      suffix=" szt."
+      placeholder="Podaj ilość akcji"
+      class="form-inputnumber"
+      [invalid]="sharesControl.touched && sharesControl.invalid"
+    />
+    @if (sharesControl.touched && sharesControl.invalid) {
+      <small class="form-error">Podaj liczbę całkowitą od 1 do 1 000 000.</small>
+    }
+  </div>
+
+  <div class="form-actions">
+    <button pButton type="button" label="Anuluj" severity="secondary" (click)="close()"></button>
+    <button pButton type="submit" label="Wyślij" [disabled]="form.invalid"></button>
+  </div>
+</form>
