@@ -2,6 +2,9 @@
 
 A real-time stocks portfolio dashboard built with Angular. This application provides a dynamic and responsive interface for tracking stock holdings, receiving live price updates via WebSockets, and visualizing portfolio composition.
 
+<img width="1898" height="940" alt="image" src="https://github.com/user-attachments/assets/fcf4eedb-1652-419f-a1c0-6368bac104c1" />
+
+
 ## Features
 
 - **Real-time Updates:** Utilizes WebSockets to receive and display live stock price changes without needing to refresh the page.
@@ -94,6 +97,17 @@ In the project directory, you can run the following `npm` scripts:
 - `npm test`: Runs the unit tests using Karma and Jasmine.
 - `npm run watch`: Builds the app in watch mode, automatically rebuilding on file changes.
 
+
+## Notes on Requirements
+
+The implementation follows the task requirements with the following assumptions and clarifications:
+
+- The chart is rendered using PrimeNG `p-chart`, which uses Chart.js under the hood, so the Chart.js requirement is fulfilled.
+- Based on the API documentation, `price_net` is returned by both the REST API and the WebSocket messages.
+- In practice, the missing value concerns the gross price in WebSocket updates, not the net price. Therefore, gross values are derived from net values using the 23% VAT rate only when not present in the incoming update payload.
+- The table is sorted by number of shares in descending order to keep it consistent with the chart, which also visualizes share distribution.
+- For better chart readability, only the top companies are shown individually, while the remaining positions are aggregated into `Inne`.
+
 ## AI Assistance
 
 AI tools were used as a supporting aid during an iterative development process, primarily for:
@@ -104,3 +118,7 @@ AI tools were used as a supporting aid during an iterative development process, 
 - generating example unit tests.
 
 All code was reviewed, adjusted, and validated to ensure correctness, consistency, and full understanding of the solution.
+
+## Author
+
+Anna Olender · https://github.com/olenderam
