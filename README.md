@@ -122,4 +122,5 @@ All code was reviewed, adjusted, and validated to ensure correctness, consistenc
 ## Author
 
 Anna Olender · https://github.com/olenderam
+
 Built as a recruitment task submission.
