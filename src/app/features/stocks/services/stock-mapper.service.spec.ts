@@ -202,7 +202,7 @@ describe('StockMapperService', () => {
       expect(result.rows[0].totalGross).toBe(1845);
     });
 
-    it('should leave rows unchanged when update does not match any row', () => {
+    it('should add new row when websocket update does not match any existing row', () => {
       const current: StockRow[] = [
         {
           id: 1,
@@ -230,8 +230,82 @@ describe('StockMapperService', () => {
 
       const result = service.mergePriceUpdates(current, message);
 
-      expect(result.rows).toEqual(current);
-      expect(result.updatedIds.size).toBe(0);
+      expect(result.updatedIds.has(999)).toBeTrue();
+      expect(result.rows.length).toBe(2);
+      expect(result.rows).toContain(
+        jasmine.objectContaining({
+          id: 999,
+          name: 'Unknown',
+          shares: 1,
+          unitNet: 10,
+          unitGross: 12.3,
+          totalNet: 10,
+          totalGross: 12.3,
+          trend: null,
+        }),
+      );
+    });
+
+    it('should update existing row and add new row in the same websocket message', () => {
+      const current: StockRow[] = [
+        {
+          id: 1,
+          name: 'ACME',
+          shares: 10,
+          unitNet: 100,
+          unitGross: 123,
+          totalNet: 1000,
+          totalGross: 1230,
+          trend: null,
+        },
+      ];
+
+      const message: WsPriceUpdateMessage = {
+        type: WsMessage.PriceUpdate,
+        data: [
+          {
+            id: 1,
+            name: 'ACME Updated',
+            shares: 12,
+            price_net: 110,
+          },
+          {
+            id: 2,
+            name: 'Globex',
+            shares: 5,
+            price_net: 20,
+          },
+        ],
+      };
+
+      const result = service.mergePriceUpdates(current, message);
+
+      expect(result.updatedIds.has(1)).toBeTrue();
+      expect(result.updatedIds.has(2)).toBeTrue();
+      expect(result.rows.length).toBe(2);
+
+      expect(result.rows).toContain(
+        jasmine.objectContaining({
+          id: 1,
+          name: 'ACME Updated',
+          shares: 12,
+          unitNet: 110,
+          trend: 'up',
+        }),
+      );
+
+      expect(result.rows).toContain(
+        jasmine.objectContaining({
+          id: 2,
+          name: 'Globex',
+          shares: 5,
+          unitNet: 20,
+          unitGross: 24.6,
+          totalNet: 100,
+          totalGross: 123,
+          trend: null,
+        }),
+      );
     });
   });
 

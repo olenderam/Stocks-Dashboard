@@ -21,6 +21,7 @@ import {
 import { sanitizeCompanyName } from '../utils/stock-util';
 import { SaveCompanyBody } from '@core/models/stock-api.model';
 import { StockRow } from '@core/models/stock-view.model';
+import { WsPriceUpdateMessage } from '@core/models/stock-ws.model';
 
 @Injectable({ providedIn: 'root' })
 export class StockStoreService {
@@ -35,7 +36,6 @@ export class StockStoreService {
   private readonly _saving = signal(false);
   private readonly _initialized = signal(false);
   private readonly _updatedRowIds = signal<Set<number>>(new Set());
-  private readonly _wsInitialized = signal(false);
 
   readonly rows = this._rows.asReadonly();
   readonly loading = this._loading.asReadonly();
@@ -44,6 +44,8 @@ export class StockStoreService {
   readonly updatedRowIds = this._updatedRowIds.asReadonly();
   readonly wsConnectionStatus = this.ws.connectionStatus;
 
+  private readonly pendingWsMessages: WsPriceUpdateMessage[] = [];
+  private isLoadInFlight = false;
   private highlightTimeout: number | null = null;
   private previousWsStatus: string | null = null;
   private retryEffectInitialized = false;
@@ -117,18 +119,32 @@ export class StockStoreService {
   }
 
   load(): void {
+    if (this.isLoadInFlight) {
+      return;
+    }
+
+    this.isLoadInFlight = true;
     this._loading.set(true);
 
     this.api
       .getData()
       .pipe(
-        finalize(() => this._loading.set(false)),
+        finalize(() => {
+          this.isLoadInFlight = false;
+          this._loading.set(false);
+        }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
         next: (response) => {
-          const rows = this.mapper.toStockRows(response?.data ?? []);
+          const baseRows = this.mapper.toStockRows(response?.data ?? []);
+          const { rows, updatedIds } = this.applyBufferedWsMessages(baseRows);
+
           this._rows.set(this.sortRows(rows));
+
+          if (updatedIds.size > 0) {
+            this.triggerRowHighlight(updatedIds);
+          }
         },
         error: () => {
           // handled globally by http interceptor (toast message)
@@ -172,6 +188,11 @@ export class StockStoreService {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (message) => {
+          if (this.isLoadInFlight) {
+            this.pendingWsMessages.push(message);
+            return;
+          }
+
           const { rows, updatedIds } = this.mapper.mergePriceUpdates(this._rows(), message);
 
           this._rows.set(this.sortRows(rows));
@@ -181,6 +202,31 @@ export class StockStoreService {
           // web socket errors are handled in StockWsService (status + reconnect)
         },
       });
+  }
+
+  private applyBufferedWsMessages(baseRows: StockRow[]): {
+    rows: StockRow[];
+    updatedIds: Set<number>;
+  } {
+    let rows = baseRows;
+    const updatedIds = new Set<number>();
+
+    for (const message of this.pendingWsMessages) {
+      const merged = this.mapper.mergePriceUpdates(rows, message);
+      rows = merged.rows;
+      merged.updatedIds.forEach((id) => updatedIds.add(id));
+    }
+
+    this.clearPendingWsMessages();
+
+    return {
+      rows,
+      updatedIds,
+    };
+  }
+
+  private clearPendingWsMessages(): void {
+    this.pendingWsMessages.length = 0;
   }
 
   private sortRows(rows: StockRow[]): StockRow[] {

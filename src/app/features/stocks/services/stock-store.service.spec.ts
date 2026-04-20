@@ -122,6 +122,24 @@ describe('StockStoreService', () => {
     expect(service.loading()).toBeFalse();
   });
 
+  it('should not start another load while one is already in flight', () => {
+    const apiResponse$ = new Subject<{ success: boolean; data: CompanyApi[] }>();
+    apiSpy.getData.and.returnValue(apiResponse$.asObservable());
+    mapperSpy.toStockRows.and.returnValue([rowA, rowB]);
+
+    service.load();
+    service.load();
+
+    expect(apiSpy.getData).toHaveBeenCalledTimes(1);
+    expect(service.loading()).toBeTrue();
+
+    apiResponse$.next({ success: true, data: [companyA, companyB] });
+    apiResponse$.complete();
+
+    expect(service.rows()).toEqual([rowB, rowA]);
+    expect(service.loading()).toBeFalse();
+  });
+
   it('should sanitize payload, save and update sorted rows', () => {
     const payload: SaveCompanyBody = {
       name: '   New Company   ',
@@ -165,7 +183,7 @@ describe('StockStoreService', () => {
     expect(service.updatedRowIds().has(3)).toBeTrue();
   });
 
-  it('should update rows from websocket message and set highlight ids', () => {
+  it('should merge websocket message into current rows and set highlight ids', () => {
     const message: WsPriceUpdateMessage = {
       type: WsMessage.PriceUpdate,
       data: [
@@ -202,6 +220,228 @@ describe('StockStoreService', () => {
     expect(mapperSpy.mergePriceUpdates).toHaveBeenCalledWith([rowB, rowA], message);
     expect(service.rows()).toEqual([rowB, updatedRowA]);
     expect(service.updatedRowIds().has(1)).toBeTrue();
+  });
+
+  it('should add new row from websocket message when it does not exist in current rows', () => {
+    const message: WsPriceUpdateMessage = {
+      type: WsMessage.PriceUpdate,
+      data: [
+        {
+          id: 3,
+          name: 'NewCo',
+          shares: 30,
+          price_net: 10,
+        },
+      ],
+    };
+
+    const newRow: StockRow = {
+      id: 3,
+      name: 'NewCo',
+      shares: 30,
+      unitNet: 10,
+      unitGross: 12.3,
+      totalNet: 300,
+      totalGross: 369,
+      trend: null,
+    };
+
+    apiSpy.getData.and.returnValue(of({ success: true, data: [companyA, companyB] }));
+    mapperSpy.toStockRows.and.returnValue([rowA, rowB]);
+    mapperSpy.mergePriceUpdates.and.returnValue({
+      rows: [rowA, rowB, newRow],
+      updatedIds: new Set([3]),
+    });
+
+    service.init();
+    wsConnect$.next(message);
+
+    expect(mapperSpy.mergePriceUpdates).toHaveBeenCalledWith([rowB, rowA], message);
+    expect(service.rows()).toEqual([newRow, rowB, rowA]);
+    expect(service.updatedRowIds().has(3)).toBeTrue();
+  });
+
+  it('should buffer websocket messages while load is in flight and apply them after api response', () => {
+    const apiResponse$ = new Subject<{ success: boolean; data: CompanyApi[] }>();
+
+    const message: WsPriceUpdateMessage = {
+      type: WsMessage.PriceUpdate,
+      data: [
+        {
+          id: 1,
+          name: 'ACME',
+          shares: 15,
+          price_net: 120,
+        },
+      ],
+    };
+
+    const updatedRowA: StockRow = {
+      ...rowA,
+      shares: 15,
+      unitNet: 120,
+      unitGross: 147.6,
+      totalNet: 1800,
+      totalGross: 2214,
+      trend: 'up',
+    };
+
+    apiSpy.getData.and.returnValue(apiResponse$.asObservable());
+    mapperSpy.toStockRows.and.returnValue([rowA, rowB]);
+    mapperSpy.mergePriceUpdates.and.returnValue({
+      rows: [updatedRowA, rowB],
+      updatedIds: new Set([1]),
+    });
+
+    service.init();
+
+    wsConnect$.next(message);
+
+    expect((service as any).pendingWsMessages).toEqual([message]);
+    expect(mapperSpy.mergePriceUpdates).not.toHaveBeenCalled();
+    expect(service.rows()).toEqual([]);
+
+    apiResponse$.next({ success: true, data: [companyA, companyB] });
+    apiResponse$.complete();
+
+    expect(mapperSpy.toStockRows).toHaveBeenCalledWith([companyA, companyB]);
+    expect(mapperSpy.mergePriceUpdates).toHaveBeenCalledWith([rowA, rowB], message);
+    expect(service.rows()).toEqual([rowB, updatedRowA]);
+    expect(service.updatedRowIds().has(1)).toBeTrue();
+    expect((service as any).pendingWsMessages.length).toBe(0);
+    expect(service.loading()).toBeFalse();
+  });
+
+  it('should add new row from buffered websocket message after api response', () => {
+    const apiResponse$ = new Subject<{ success: boolean; data: CompanyApi[] }>();
+
+    const message: WsPriceUpdateMessage = {
+      type: WsMessage.PriceUpdate,
+      data: [
+        {
+          id: 3,
+          name: 'NewCo',
+          shares: 30,
+          price_net: 10,
+        },
+      ],
+    };
+
+    const newRow: StockRow = {
+      id: 3,
+      name: 'NewCo',
+      shares: 30,
+      unitNet: 10,
+      unitGross: 12.3,
+      totalNet: 300,
+      totalGross: 369,
+      trend: null,
+    };
+
+    apiSpy.getData.and.returnValue(apiResponse$.asObservable());
+    mapperSpy.toStockRows.and.returnValue([rowA, rowB]);
+    mapperSpy.mergePriceUpdates.and.returnValue({
+      rows: [rowA, rowB, newRow],
+      updatedIds: new Set([3]),
+    });
+
+    service.init();
+
+    wsConnect$.next(message);
+
+    expect((service as any).pendingWsMessages).toEqual([message]);
+    expect(service.rows()).toEqual([]);
+
+    apiResponse$.next({ success: true, data: [companyA, companyB] });
+    apiResponse$.complete();
+
+    expect(mapperSpy.mergePriceUpdates).toHaveBeenCalledWith([rowA, rowB], message);
+    expect(service.rows()).toEqual([newRow, rowB, rowA]);
+    expect(service.updatedRowIds().has(3)).toBeTrue();
+  });
+
+  it('should apply multiple buffered websocket messages in order after api response', () => {
+    const apiResponse$ = new Subject<{ success: boolean; data: CompanyApi[] }>();
+
+    const firstMessage: WsPriceUpdateMessage = {
+      type: WsMessage.PriceUpdate,
+      data: [
+        {
+          id: 1,
+          name: 'ACME',
+          shares: 15,
+          price_net: 120,
+        },
+      ],
+    };
+
+    const secondMessage: WsPriceUpdateMessage = {
+      type: WsMessage.PriceUpdate,
+      data: [
+        {
+          id: 2,
+          name: 'Globex',
+          shares: 25,
+          price_net: 55,
+        },
+      ],
+    };
+
+    const rowsAfterFirstMerge: StockRow[] = [
+      {
+        ...rowA,
+        shares: 15,
+        unitNet: 120,
+        unitGross: 147.6,
+        totalNet: 1800,
+        totalGross: 2214,
+        trend: 'up',
+      },
+      rowB,
+    ];
+
+    const rowsAfterSecondMerge: StockRow[] = [
+      rowsAfterFirstMerge[0],
+      {
+        ...rowB,
+        shares: 25,
+        unitNet: 55,
+        unitGross: 67.65,
+        totalNet: 1375,
+        totalGross: 1691.25,
+        trend: 'up',
+      },
+    ];
+
+    apiSpy.getData.and.returnValue(apiResponse$.asObservable());
+    mapperSpy.toStockRows.and.returnValue([rowA, rowB]);
+
+    mapperSpy.mergePriceUpdates.withArgs([rowA, rowB], firstMessage).and.returnValue({
+      rows: rowsAfterFirstMerge,
+      updatedIds: new Set([1]),
+    });
+
+    mapperSpy.mergePriceUpdates.withArgs(rowsAfterFirstMerge, secondMessage).and.returnValue({
+      rows: rowsAfterSecondMerge,
+      updatedIds: new Set([2]),
+    });
+
+    service.init();
+
+    wsConnect$.next(firstMessage);
+    wsConnect$.next(secondMessage);
+
+    apiResponse$.next({ success: true, data: [companyA, companyB] });
+    apiResponse$.complete();
+
+    expect(mapperSpy.mergePriceUpdates).toHaveBeenCalledWith([rowA, rowB], firstMessage);
+    expect(mapperSpy.mergePriceUpdates).toHaveBeenCalledWith(rowsAfterFirstMerge, secondMessage);
+    expect(service.rows()).toEqual([
+      { ...rowsAfterSecondMerge[1] },
+      { ...rowsAfterSecondMerge[0] },
+    ]);
+    expect(service.updatedRowIds().has(1)).toBeTrue();
+    expect(service.updatedRowIds().has(2)).toBeTrue();
   });
 
   it('should aggregate extra chart rows into "Inne"', () => {
