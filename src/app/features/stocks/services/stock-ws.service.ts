@@ -28,6 +28,7 @@ export class StockWsService {
       }),
     );
   }
+
   private createConnectionStream(): Observable<WsPriceUpdateMessage> {
     return defer(() => {
       let retryAttempt = 0;
@@ -74,8 +75,10 @@ export class StockWsService {
   private batchAndNormalizeMessages() {
     return (source: Observable<WsPriceUpdateMessage>): Observable<WsPriceUpdateMessage> =>
       source.pipe(
-        map((message) => this.validateMessage(message)),
-        filter((message): message is WsPriceUpdateMessage => message !== null),
+        filter(
+          (message): message is WsPriceUpdateMessage =>
+            message.type === WsMessage.PriceUpdate && Array.isArray(message.data),
+        ),
         bufferTime(this.batchTimeMs, undefined, this.batchMaxSize),
         filter((messages) => messages.length > 0),
         map((messages) => this.mergeBatchedMessages(messages)),
@@ -107,13 +110,5 @@ export class StockWsService {
       type: WsMessage.PriceUpdate,
       data: Array.from(latestById.values()),
     };
-  }
-
-  private validateMessage(message: WsPriceUpdateMessage): WsPriceUpdateMessage | null {
-    if (message.type === WsMessage.PriceUpdate && Array.isArray(message.data)) {
-      return message;
-    }
-
-    return null;
   }
 }

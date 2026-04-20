@@ -29,7 +29,6 @@ export class StockMapperService {
     current: StockRow[],
     message: WsPriceUpdateMessage,
   ): { rows: StockRow[]; updatedIds: Set<number> } {
-    const updatesById = new Map(message.data.map((item) => [item.id, item]));
     const updatedIds = new Set<number>();
 
     const rowsById = new Map<number, StockRow>(current.map((row) => [row.id, row]));
@@ -63,7 +62,6 @@ export class StockMapperService {
       }
 
       updatedIds.add(update.id);
-      updatesById.delete(update.id);
     }
 
     return { rows: Array.from(rowsById.values()), updatedIds };
