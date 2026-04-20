@@ -32,28 +32,41 @@ export class StockMapperService {
     const updatesById = new Map(message.data.map((item) => [item.id, item]));
     const updatedIds = new Set<number>();
 
-    const rows = current.map((row) => {
-      const update = updatesById.get(row.id);
-      if (!update) return row;
+    const rowsById = new Map<number, StockRow>(current.map((row) => [row.id, row]));
 
+    for (const update of message.data) {
+      const existingRow = rowsById.get(update.id);
       const unitNet = roundPrice(update.price_net);
       const unitGross = roundPrice(calculateGrossFromNet(unitNet));
       const shares = update.shares;
 
-      updatedIds.add(row.id);
+      if (existingRow) {
+        rowsById.set(update.id, {
+          ...existingRow,
+          name: update.name,
+          shares,
+          unitNet,
+          unitGross,
+          ...this.calculateTotals(shares, unitNet, unitGross),
+          trend: this.getTrend(existingRow.unitNet, unitNet),
+        });
+      } else {
+        rowsById.set(update.id, {
+          id: update.id,
+          name: update.name,
+          shares,
+          unitNet,
+          unitGross,
+          ...this.calculateTotals(shares, unitNet, unitGross),
+          trend: null,
+        });
+      }
 
-      return {
-        ...row,
-        name: update.name,
-        shares,
-        unitNet,
-        unitGross,
-        ...this.calculateTotals(shares, unitNet, unitGross),
-        trend: this.getTrend(row.unitNet, unitNet),
-      };
-    });
+      updatedIds.add(update.id);
+      updatesById.delete(update.id);
+    }
 
-    return { rows, updatedIds };
+    return { rows: Array.from(rowsById.values()), updatedIds };
   }
 
   upsertRow(current: StockRow[], company: CompanyApi): StockRow[] {

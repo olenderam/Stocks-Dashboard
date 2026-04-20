@@ -1,83 +1,119 @@
 import { inject, Injectable, signal } from '@angular/core';
+import { Observable, Subject, defer, timer } from 'rxjs';
+import { bufferTime, filter, map, retry, share } from 'rxjs/operators';
+import { webSocket, WebSocketSubjectConfig } from 'rxjs/webSocket';
 import { WsConnectionStatus, WsMessage, WsPriceUpdateMessage } from '@core/models/stock-ws.model';
 import { WS_URL } from '@core/tokens/ws-url.token';
-import { Observable } from 'rxjs';
 
 @Injectable({ providedIn: 'root' })
 export class StockWsService {
   private readonly wsUrl = inject(WS_URL);
-  private readonly reconnectDelayMs = 3000;
+
+  private readonly reconnectBaseDelayMs = 1000;
+  private readonly reconnectMaxDelayMs = 30000;
+  private readonly batchTimeMs = 250;
+  private readonly batchMaxSize = 50;
 
   private readonly _connectionStatus = signal<WsConnectionStatus>('disconnected');
-
   readonly connectionStatus = this._connectionStatus.asReadonly();
 
   connect(): Observable<WsPriceUpdateMessage> {
-    return new Observable<WsPriceUpdateMessage>((observer) => {
-      let socket: WebSocket | null = null;
-      let reconnectTimeout: number | null = null;
-      let closedByUser = false;
-      let hasConnectedAtLeastOnce = false;
+    return this.createConnectionStream().pipe(
+      this.batchAndNormalizeMessages(),
+      share({
+        connector: () => new Subject<WsPriceUpdateMessage>(),
+        resetOnError: false,
+        resetOnComplete: false,
+        resetOnRefCountZero: true,
+      }),
+    );
+  }
+  private createConnectionStream(): Observable<WsPriceUpdateMessage> {
+    return defer(() => {
+      let retryAttempt = 0;
 
-      const openConnection = () => {
-        this._connectionStatus.set(hasConnectedAtLeastOnce ? 'reconnecting' : 'connecting');
+      this._connectionStatus.set('connecting');
 
-        socket = new WebSocket(this.wsUrl);
+      return webSocket<WsPriceUpdateMessage>(
+        this.createSocketConfig(() => {
+          retryAttempt = 0;
+        }),
+      ).pipe(
+        retry({
+          delay: (_error, retryCount) => {
+            retryAttempt = retryCount;
+            this._connectionStatus.set('reconnecting');
 
-        socket.onopen = () => {
-          hasConnectedAtLeastOnce = true;
-          this._connectionStatus.set('connected');
-        };
-
-        socket.onmessage = (event) => {
-          const message = this.parseMessage(event.data);
-
-          if (message) {
-            observer.next(message);
-          }
-        };
-
-        socket.onerror = () => {
-          // connection error handled by reconnecting mechanism
-        };
-
-        socket.onclose = () => {
-          if (closedByUser) {
-            this._connectionStatus.set('disconnected');
-            return;
-          }
-
-          this._connectionStatus.set('reconnecting');
-          reconnectTimeout = setTimeout(openConnection, this.reconnectDelayMs);
-        };
-      };
-
-      openConnection();
-
-      return () => {
-        closedByUser = true;
-
-        if (reconnectTimeout) {
-          clearTimeout(reconnectTimeout);
-        }
-
-        socket?.close();
-        this._connectionStatus.set('disconnected');
-      };
+            return timer(this.getReconnectDelay(retryAttempt));
+          },
+          resetOnSuccess: true,
+        }),
+      );
     });
   }
 
-  private parseMessage(rawData: string): WsPriceUpdateMessage | null {
-    try {
-      const parsed = JSON.parse(rawData) as Partial<WsPriceUpdateMessage>;
+  private createSocketConfig(
+    onConnected: () => void,
+  ): WebSocketSubjectConfig<WsPriceUpdateMessage> {
+    return {
+      url: this.wsUrl,
+      openObserver: {
+        next: () => {
+          onConnected();
+          this._connectionStatus.set('connected');
+        },
+      },
+      closeObserver: {
+        next: () => {
+          this._connectionStatus.set('reconnecting');
+        },
+      },
+    };
+  }
 
-      if (parsed.type === WsMessage.PriceUpdate && Array.isArray(parsed.data)) {
-        return parsed as WsPriceUpdateMessage;
+  private batchAndNormalizeMessages() {
+    return (source: Observable<WsPriceUpdateMessage>): Observable<WsPriceUpdateMessage> =>
+      source.pipe(
+        map((message) => this.validateMessage(message)),
+        filter((message): message is WsPriceUpdateMessage => message !== null),
+        bufferTime(this.batchTimeMs, undefined, this.batchMaxSize),
+        filter((messages) => messages.length > 0),
+        map((messages) => this.mergeBatchedMessages(messages)),
+      );
+  }
+
+  private getReconnectDelay(retryAttempt: number): number {
+    const attempt = Math.max(retryAttempt, 1);
+    const exponentialDelay = this.reconnectBaseDelayMs * Math.pow(2, attempt - 1);
+
+    return Math.min(exponentialDelay, this.reconnectMaxDelayMs);
+  }
+
+  private mergeBatchedMessages(messages: WsPriceUpdateMessage[]): WsPriceUpdateMessage {
+    const latestById = new Map<number, WsPriceUpdateMessage['data'][number]>();
+
+    for (const message of messages) {
+      for (const company of message.data) {
+        const previous = latestById.get(company.id);
+
+        latestById.set(company.id, {
+          ...(previous ?? {}),
+          ...company,
+        });
       }
-
-      return null;
-    } catch {
-      return null;
     }
+
+    return {
+      type: WsMessage.PriceUpdate,
+      data: Array.from(latestById.values()),
+    };
+  }
+
+  private validateMessage(message: WsPriceUpdateMessage): WsPriceUpdateMessage | null {
+    if (message.type === WsMessage.PriceUpdate && Array.isArray(message.data)) {
+      return message;
+    }
+
+    return null;
   }
 }
